@@ -9,6 +9,7 @@ import * as configUtil from './confighelper';
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as yaml from 'js-yaml';
 
 export interface TargetInformation {
     name: string;
@@ -22,9 +23,11 @@ interface TargetResult {
 }
 
 export class BuildProjectContext implements vscode.Disposable {
+    private static readonly CompletionFileName: string = 'shell-completion.yaml';
     private readonly invalidateEventEmitter = new vscode.EventEmitter<void>();
     private readonly buildProjectPath: Uri;
     private readonly buildProjectFolder: Uri;
+    private readonly soltuionPath: string;
 
     private fileSystemWachter: vscode.FileSystemWatcher;
     private targetRegExp: RegExp;
@@ -46,6 +49,7 @@ export class BuildProjectContext implements vscode.Disposable {
         this.buildProjectFolder = Uri.file(buildProjectPath.path.substring(0, buildProjectPath.path.lastIndexOf('/')));
         this.buildProjectFolderRelativePath = vscode.workspace.asRelativePath(this.buildProjectFolder);
         this.buildAssemblyName = this.buildProjectPath.path.substring(this.buildProjectPath.path.lastIndexOf('/') + 1).replace('.csproj', '');
+        this.soltuionPath = this.buildProjectFolder.path.substring(0, this.buildProjectFolder.path.lastIndexOf('/'));
 
         this.fileSystemWachter = vscode.workspace.createFileSystemWatcher(`${this.buildProjectFolder.fsPath}/**/*.cs*`, true, true, false);
 
@@ -85,6 +89,13 @@ export class BuildProjectContext implements vscode.Disposable {
     }
 
     private findProjectTargets(): TargetInformation[] {
+        const completionFile = this.findCompletionFile(this.soltuionPath);
+        if(completionFile != undefined) {
+            const yamlContent = yaml.safeLoad(fs.readFileSync(completionFile, 'utf-8'));
+            return yamlContent.Target.map(x => <TargetInformation>{ name: x });
+        }
+
+        // Fall back to parsing cs-Files
         let targets: TargetInformation[] = [];
         const files: string[] = this.findFilesByExtension(this.buildProjectFolder.fsPath, 'cs');
         files.forEach(file => {
@@ -109,6 +120,11 @@ export class BuildProjectContext implements vscode.Disposable {
             }
         });
         return result;
+    }
+
+    private findCompletionFile(searchBase: string): string {
+        const files = this.findFilesByExtension(searchBase, 'yml');
+        return files.find(file => path.basename(file) === BuildProjectContext.CompletionFileName);
     }
 
     private isChildOf(rootPath: vscode.Uri, childPath: vscode.Uri): boolean {
